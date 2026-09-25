@@ -1,0 +1,6 @@
+component_config.hpp
+build/
+.vscode/
+.idea/
+*.swp
+*~
