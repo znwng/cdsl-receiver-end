@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
-import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -12,7 +12,7 @@ def to_pascal_case(name: str) -> str:
 def main() -> None:
     if len(sys.argv) != 3:
         print(
-            f"usage: {sys.argv[0]} <config.toml> <output.hpp>",
+            f"usage: {sys.argv[0]} <config.xml> <output.hpp>",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -23,29 +23,36 @@ def main() -> None:
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    with config_path.open("rb") as file:
-        config = tomllib.load(file)
+    tree = ET.parse(config_path)
+    root = tree.getroot()
 
-    components = config.get("component")
+    component_section = root.find("component")
 
-    if not components:
-        raise ValueError("No [component.*] sections found in config.toml")
+    if component_section is None:
+        raise ValueError("No <component> section found in config.xml")
 
     component_data = []
 
-    for name, data in components.items():
-        if "id" not in data:
+    for component in component_section:
+        name = component.tag
+
+        id_element = component.find("id")
+
+        if id_element is None:
             raise ValueError(f"Component '{name}' is missing an 'id'")
 
-        component_id = data["id"]
-
-        if not isinstance(component_id, int):
+        try:
+            component_id = int(id_element.text)
+        except (TypeError, ValueError):
             raise ValueError(f"Component '{name}' has a non-integer id")
 
         if not 0 <= component_id <= 255:
             raise ValueError(f"Component '{name}' id must be between 0 and 255")
 
         component_data.append((name, component_id))
+
+    if not component_data:
+        raise ValueError("No components found in config.xml")
 
     ids = [component_id for _, component_id in component_data]
 
