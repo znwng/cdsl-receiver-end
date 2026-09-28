@@ -3,39 +3,25 @@ GENERATED := component_config.hpp
 GENERATOR := generate_config.py
 
 FQBN ?= arduino:avr:uno
-PORT ?= /dev/ttyUSB0
+PORT := $(shell python3 -c 'import tomllib; print(tomllib.load(open("$(CONFIG)", "rb"))["arduino"]["port"])')
 
-BUILD_TYPE ?= Debug
+.PHONY: all generate compile flash clean
 
-ifeq ($(BUILD_TYPE),Release)
-KEEP_GENERATED := false
-else ifeq ($(BUILD_TYPE),Debug)
-KEEP_GENERATED := true
-else
-$(error Invalid BUILD_TYPE='$(BUILD_TYPE)'. Use BUILD_TYPE=Release or BUILD_TYPE=Debug)
-endif
-
-.PHONY: all generate compile upload clean
-
-all: upload
+all: generate compile flash
 
 generate:
 	python3 $(GENERATOR) $(CONFIG) $(GENERATED)
 
-compile: generate
+compile:
 	arduino-cli compile \
 		--fqbn $(FQBN) \
 		.
 
-	$(if $(filter false,$(KEEP_GENERATED)),rm -f $(GENERATED))
-
-upload: compile
+flash:
 	arduino-cli upload \
 		-p $(PORT) \
 		--fqbn $(FQBN) \
 		.
-
-	$(if $(filter false,$(KEEP_GENERATED)),rm -f $(GENERATED))
 
 clean:
 	rm -f $(GENERATED)
