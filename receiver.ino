@@ -3,7 +3,14 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
 #include "component_config.hpp"
+
+// ============================================================
+// PACKET CONFIG
+// ============================================================
 
 constexpr uint8_t START_BYTE = 0xAA;
 
@@ -12,6 +19,108 @@ constexpr uint16_t CRC16_POLYNOMIAL = 0x8408;
 
 constexpr uint8_t PACKET_SIZE = 10;
 constexpr uint8_t CRC_SIZE = 2;
+
+// ============================================================
+// PCA9685 CONFIG
+// ============================================================
+
+constexpr uint8_t PCA_ADDR = 0x40;
+
+Adafruit_PWMServoDriver pca(PCA_ADDR);
+
+// ============================================================
+// SERVO CHANNELS
+// ============================================================
+
+constexpr uint8_t BASE_MOTOR = 0;
+constexpr uint8_t LEFT_MOTOR = 1;
+constexpr uint8_t RIGHT_MOTOR = 2;
+constexpr uint8_t ELBOW_MOTOR = 3;
+constexpr uint8_t WRIST1_MOTOR = 4;
+constexpr uint8_t WRIST2_MOTOR = 5;
+constexpr uint8_t GRIPPER_MOTOR = 6;
+
+// ============================================================
+// SERVO LIMITS
+// ============================================================
+
+constexpr uint16_t SERVO_MIN = 130;
+constexpr uint16_t SERVO_MAX = 520;
+
+// ============================================================
+// SERVO STATE
+// ============================================================
+
+float baseAngle = 0.0f;
+float shoulderAngle = 0.0f;
+float elbowAngle = 0.0f;
+float wristAngle = 0.0f;
+float handAngle = 0.0f;
+float clawAngle = 0.0f;
+
+// ============================================================
+// COMPONENT CONFIG
+// ============================================================
+
+const ComponentConfig* get_config(ComponentId component) {
+    return get_component_config(component);
+}
+
+float default_angle(ComponentId component) {
+    const auto* config = get_config(component);
+
+    if (config == nullptr) {
+        return 0.0f;
+    }
+
+    return config->default_value;
+}
+
+// ============================================================
+// SERVO CONTROL
+// ============================================================
+
+uint16_t angleToPulse(float angle) {
+    return static_cast<uint16_t>(SERVO_MIN + (angle / 180.0f) * (SERVO_MAX - SERVO_MIN));
+}
+
+void setServo(uint8_t channel, float angle) {
+    const uint16_t pulse = angleToPulse(angle);
+
+    pca.setPWM(channel, 0, pulse);
+}
+
+void moveShoulder(float angle) {
+    // Shoulder motors are mechanically mirrored.
+    const float rightAngle = 180.0f - angle;
+
+    setServo(LEFT_MOTOR, angle);
+    setServo(RIGHT_MOTOR, rightAngle);
+}
+
+// ============================================================
+// HOME
+// ============================================================
+
+void homePosition() {
+    baseAngle = default_angle(ComponentId::Base);
+    shoulderAngle = default_angle(ComponentId::Shoulder);
+    elbowAngle = default_angle(ComponentId::Elbow);
+    wristAngle = default_angle(ComponentId::Wrist);
+    handAngle = default_angle(ComponentId::Hand);
+    clawAngle = default_angle(ComponentId::Claw);
+
+    setServo(BASE_MOTOR, baseAngle);
+    moveShoulder(shoulderAngle);
+    setServo(ELBOW_MOTOR, elbowAngle);
+    setServo(WRIST1_MOTOR, wristAngle);
+    setServo(WRIST2_MOTOR, handAngle);
+    setServo(GRIPPER_MOTOR, clawAngle);
+}
+
+// ============================================================
+// CRC
+// ============================================================
 
 uint16_t crc16(const uint8_t* data, uint8_t size) {
     uint16_t crc = CRC16_INITIAL_VALUE;
@@ -31,9 +140,12 @@ uint16_t crc16(const uint8_t* data, uint8_t size) {
     return crc;
 }
 
+// ============================================================
+// PACKET DECODING
+// ============================================================
+
 uint16_t read_uint16_le(const uint8_t* data) {
-    return static_cast<uint16_t>(data[0]) |
-           (static_cast<uint16_t>(data[1]) << 8);
+    return static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
 }
 
 float read_float(const uint8_t* data) {
@@ -50,6 +162,7 @@ bool receive_packet(uint8_t* packet) {
     while (Serial.available() > 0) {
         const uint8_t byte = Serial.read();
 
+        // Wait for the start byte.
         if (index == 0) {
             if (byte != START_BYTE) {
                 continue;
@@ -81,27 +194,64 @@ bool verify_packet(const uint8_t* packet) {
     return calculated_crc == received_crc;
 }
 
-void execute_led_sequence(ComponentId component) {
-    const uint8_t duration =
-        static_cast<uint8_t>(component) + 1;
+// ============================================================
+// PACKET EXECUTION
+// ============================================================
 
-    Serial.print("LED duration: ");
-    Serial.print(duration);
-    Serial.println(" seconds");
+void execute_command(ComponentId component, float value) {
+    switch (component) {
+        case ComponentId::Base:
+            setServo(BASE_MOTOR, value);
+            break;
 
-    digitalWrite(LED_BUILTIN, HIGH);
+        case ComponentId::Shoulder:
+            moveShoulder(value);
+            break;
 
-    delay(static_cast<uint32_t>(duration) * 1000);
+        case ComponentId::Elbow:
+            setServo(ELBOW_MOTOR, value);
+            break;
 
-    digitalWrite(LED_BUILTIN, LOW);
+        case ComponentId::Wrist:
+            setServo(WRIST1_MOTOR, value);
+            break;
+
+        case ComponentId::Hand:
+            setServo(WRIST2_MOTOR, value);
+            break;
+
+        case ComponentId::Claw:
+            setServo(GRIPPER_MOTOR, value);
+            break;
+    }
 }
+
+// ============================================================
+// SETUP
+// ============================================================
 
 void setup() {
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, LOW);
-
     Serial.begin(115200);
+
+    Wire.begin();
+
+    pca.begin();
+    pca.setPWMFreq(50);
+
+    delay(500);
+
+    homePosition();
+
+    Serial.println("=================================");
+    Serial.println("HB-A5-01 ROBOT ARM CONTROLLER");
+    Serial.println("=================================");
+    Serial.println("Packet controller ready");
+    Serial.println("Robot moved to HOME position");
 }
+
+// ============================================================
+// LOOP
+// ============================================================
 
 void loop() {
     uint8_t packet[PACKET_SIZE];
@@ -110,23 +260,54 @@ void loop() {
         return;
     }
 
+    // Ignore corrupted packets.
     if (!verify_packet(packet)) {
+        Serial.println("Invalid packet CRC");
         return;
     }
 
-    const uint16_t packet_id = read_uint16_le(&packet[1]);
+    // --------------------------------------------------------
+    // Decode packet
+    //
+    // Byte 0   : Start byte
+    // Byte 1-2 : Packet ID
+    // Byte 3   : Component ID
+    // Byte 4-7 : Float value
+    // Byte 8-9 : CRC16
+    // --------------------------------------------------------
 
-    const uint8_t raw_component_id = packet[3];
+    const uint16_t packet_id =
+        read_uint16_le(&packet[1]);
+
+    const uint8_t raw_component_id =
+        packet[3];
+
+    const float value =
+        read_float(&packet[4]);
+
+    // --------------------------------------------------------
+    // Validate component
+    // --------------------------------------------------------
 
     if (!is_valid_component_id(raw_component_id)) {
-        Serial.println("Invalid component ID");
+        Serial.print("Invalid component ID: ");
+        Serial.println(raw_component_id);
+
         return;
     }
 
     const ComponentId component =
         static_cast<ComponentId>(raw_component_id);
 
-    const float value = read_float(&packet[4]);
+    // --------------------------------------------------------
+    // Execute
+    // --------------------------------------------------------
+
+    execute_command(component, value);
+
+    // --------------------------------------------------------
+    // Acknowledgement / debug output
+    // --------------------------------------------------------
 
     Serial.print("Packet ID: ");
     Serial.println(packet_id);
@@ -134,11 +315,6 @@ void loop() {
     Serial.print("Component: ");
     Serial.println(component_name(component));
 
-    Serial.print("Component ID: ");
-    Serial.println(raw_component_id);
-
     Serial.print("Value: ");
     Serial.println(value);
-
-    execute_led_sequence(component);
 }

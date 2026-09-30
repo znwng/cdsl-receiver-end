@@ -9,6 +9,15 @@ def to_pascal_case(name: str) -> str:
     return "".join(part.capitalize() for part in name.split("_"))
 
 
+def get_required_element(component: ET.Element, name: str, component_name: str) -> str:
+    element = component.find(name)
+
+    if element is None or element.text is None:
+        raise ValueError(f"Component '{component_name}' is missing '{name}'")
+
+    return element.text.strip()
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         print(
@@ -36,25 +45,43 @@ def main() -> None:
     for component in component_section:
         name = component.tag
 
-        id_element = component.find("id")
-
-        if id_element is None:
-            raise ValueError(f"Component '{name}' is missing an 'id'")
-
         try:
-            component_id = int(id_element.text)
-        except (TypeError, ValueError):
+            component_id = int(get_required_element(component, "id", name))
+        except ValueError:
             raise ValueError(f"Component '{name}' has a non-integer id")
 
         if not 0 <= component_id <= 255:
             raise ValueError(f"Component '{name}' id must be between 0 and 255")
 
-        component_data.append((name, component_id))
+        try:
+            minimum = float(get_required_element(component, "min", name))
+            maximum = float(get_required_element(component, "max", name))
+            default = float(get_required_element(component, "default", name))
+        except ValueError:
+            raise ValueError(
+                f"Component '{name}' has an invalid min, max, or default value"
+            )
+
+        if minimum > maximum:
+            raise ValueError(f"Component '{name}' has min greater than max")
+
+        if not minimum <= default <= maximum:
+            raise ValueError(f"Component '{name}' default must be between min and max")
+
+        component_data.append(
+            (
+                name,
+                component_id,
+                minimum,
+                maximum,
+                default,
+            )
+        )
 
     if not component_data:
         raise ValueError("No components found in config.xml")
 
-    ids = [component_id for _, component_id in component_data]
+    ids = [component_id for _, component_id, _, _, _ in component_data]
 
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate component IDs found")
@@ -69,45 +96,58 @@ def main() -> None:
 enum class ComponentId : uint8_t {
 """
 
-    for name, component_id in component_data:
+    for name, component_id, _, _, _ in component_data:
         enum_name = to_pascal_case(name)
+
         output += f"    {enum_name} = {component_id},\n"
 
     output += """\
 };
 
-inline const char* component_name(ComponentId component) {
-    switch (component) {
+struct ComponentConfig {
+    ComponentId id;
+    const char* name;
+    float min;
+    float max;
+    float default_value;
+};
+
+inline const ComponentConfig component_configs[] = {
 """
 
-    for name, _ in component_data:
+    for name, _, minimum, maximum, default in component_data:
         enum_name = to_pascal_case(name)
 
-        output += f"""\
-        case ComponentId::{enum_name}:
-            return "{name}";
-
-"""
+        output += (
+            f'    {{ComponentId::{enum_name}, "{name}", '
+            f"{minimum:g}, {maximum:g}, {default:g}}},\n"
+        )
 
     output += """\
+};
+
+inline const ComponentConfig* get_component_config(
+    ComponentId component
+) {
+    for (const auto& config : component_configs) {
+        if (config.id == component) {
+            return &config;
+        }
     }
 
-    return "unknown";
+    return nullptr;
+}
+
+inline const char* component_name(ComponentId component) {
+    const auto* config = get_component_config(component);
+
+    return config != nullptr ? config->name : "unknown";
 }
 
 inline bool is_valid_component_id(uint8_t id) {
-    switch (static_cast<ComponentId>(id)) {
-"""
-
-    for name, _ in component_data:
-        enum_name = to_pascal_case(name)
-        output += f"        case ComponentId::{enum_name}:\n"
-
-    output += """\
-            return true;
-    }
-
-    return false;
+    return get_component_config(
+        static_cast<ComponentId>(id)
+    ) != nullptr;
 }
 """
 
