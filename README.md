@@ -1,14 +1,15 @@
 # CDSL Arduino Receiver
 
-Reads `~/.config/cdsl/config.toml` and generates `component_config.hpp` for `receiver.ino`.
+Reads `~/.config/cdsl/config.xml` and generates `component_config.hpp` for `receiver.ino`.
 
 ```text
-config.toml → generate_config.py → component_config.hpp → receiver.ino
+config.xml → generate_config.py → component_config.hpp → receiver.ino
 ```
 
 ```bash
-make                              # Debug, keeps generated header, compiles and flashes the code
-make BUILD_TYPE=Release           # Release, removes generated header and the rest same as above
-make generate                     # Generate header only
-make clean                        # Remove generated header
+make          # Generate header, compile, and flash
+make generate # Generate component_config.hpp only
+make compile  # Compile the receiver
+make flash    # Flash the receiver
+make clean    # Remove generated component_config.hpp
 ```
