@@ -48,40 +48,14 @@ constexpr uint16_t SERVO_MIN = 130;
 constexpr uint16_t SERVO_MAX = 520;
 
 // ============================================================
-// SERVO STATE
-// ============================================================
-
-float baseAngle = 0.0f;
-float shoulderAngle = 0.0f;
-float elbowAngle = 0.0f;
-float wristAngle = 0.0f;
-float handAngle = 0.0f;
-float clawAngle = 0.0f;
-
-// ============================================================
-// COMPONENT CONFIG
-// ============================================================
-
-const ComponentConfig* get_config(ComponentId component) {
-    return get_component_config(component);
-}
-
-float default_angle(ComponentId component) {
-    const auto* config = get_config(component);
-
-    if (config == nullptr) {
-        return 0.0f;
-    }
-
-    return config->default_value;
-}
-
-// ============================================================
 // SERVO CONTROL
 // ============================================================
 
 uint16_t angleToPulse(float angle) {
-    return static_cast<uint16_t>(SERVO_MIN + (angle / 180.0f) * (SERVO_MAX - SERVO_MIN));
+    return static_cast<uint16_t>(
+        SERVO_MIN +
+        (angle / 180.0f) * (SERVO_MAX - SERVO_MIN)
+    );
 }
 
 void setServo(uint8_t channel, float angle) {
@@ -96,26 +70,6 @@ void moveShoulder(float angle) {
 
     setServo(LEFT_MOTOR, angle);
     setServo(RIGHT_MOTOR, rightAngle);
-}
-
-// ============================================================
-// HOME
-// ============================================================
-
-void homePosition() {
-    baseAngle = default_angle(ComponentId::Base);
-    shoulderAngle = default_angle(ComponentId::Shoulder);
-    elbowAngle = default_angle(ComponentId::Elbow);
-    wristAngle = default_angle(ComponentId::Wrist);
-    handAngle = default_angle(ComponentId::Hand);
-    clawAngle = default_angle(ComponentId::Claw);
-
-    setServo(BASE_MOTOR, baseAngle);
-    moveShoulder(shoulderAngle);
-    setServo(ELBOW_MOTOR, elbowAngle);
-    setServo(WRIST1_MOTOR, wristAngle);
-    setServo(WRIST2_MOTOR, handAngle);
-    setServo(GRIPPER_MOTOR, clawAngle);
 }
 
 // ============================================================
@@ -145,7 +99,8 @@ uint16_t crc16(const uint8_t* data, uint8_t size) {
 // ============================================================
 
 uint16_t read_uint16_le(const uint8_t* data) {
-    return static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
+    return static_cast<uint16_t>(data[0]) |
+           (static_cast<uint16_t>(data[1]) << 8);
 }
 
 float read_float(const uint8_t* data) {
@@ -238,15 +193,8 @@ void setup() {
     pca.begin();
     pca.setPWMFreq(50);
 
-    delay(500);
-
-    homePosition();
-
-    Serial.println("=================================");
     Serial.println("HB-A5-01 ROBOT ARM CONTROLLER");
-    Serial.println("=================================");
     Serial.println("Packet controller ready");
-    Serial.println("Robot moved to HOME position");
 }
 
 // ============================================================
@@ -269,21 +217,16 @@ void loop() {
     // --------------------------------------------------------
     // Decode packet
     //
-    // Byte 0   : Start byte
-    // Byte 1-2 : Packet ID
-    // Byte 3   : Component ID
-    // Byte 4-7 : Float value
-    // Byte 8-9 : CRC16
+    // Byte 1   : Start byte
+    // Byte 2-3 : Packet ID
+    // Byte 4   : Component ID
+    // Byte 5-8 : Float value
+    // Byte 9-10 : CRC16
     // --------------------------------------------------------
 
-    const uint16_t packet_id =
-        read_uint16_le(&packet[1]);
-
-    const uint8_t raw_component_id =
-        packet[3];
-
-    const float value =
-        read_float(&packet[4]);
+    const uint16_t packet_id = read_uint16_le(&packet[1]);
+    const uint8_t raw_component_id = packet[3];
+    const float value = read_float(&packet[4]);
 
     // --------------------------------------------------------
     // Validate component
@@ -296,8 +239,7 @@ void loop() {
         return;
     }
 
-    const ComponentId component =
-        static_cast<ComponentId>(raw_component_id);
+    const ComponentId component = static_cast<ComponentId>(raw_component_id);
 
     // --------------------------------------------------------
     // Execute

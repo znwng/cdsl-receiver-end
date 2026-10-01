@@ -9,7 +9,11 @@ def to_pascal_case(name: str) -> str:
     return "".join(part.capitalize() for part in name.split("_"))
 
 
-def get_required_element(component: ET.Element, name: str, component_name: str) -> str:
+def get_required_element(
+    component: ET.Element,
+    name: str,
+    component_name: str,
+) -> str:
     element = component.find(name)
 
     if element is None or element.text is None:
@@ -53,35 +57,12 @@ def main() -> None:
         if not 0 <= component_id <= 255:
             raise ValueError(f"Component '{name}' id must be between 0 and 255")
 
-        try:
-            minimum = float(get_required_element(component, "min", name))
-            maximum = float(get_required_element(component, "max", name))
-            default = float(get_required_element(component, "default", name))
-        except ValueError:
-            raise ValueError(
-                f"Component '{name}' has an invalid min, max, or default value"
-            )
-
-        if minimum > maximum:
-            raise ValueError(f"Component '{name}' has min greater than max")
-
-        if not minimum <= default <= maximum:
-            raise ValueError(f"Component '{name}' default must be between min and max")
-
-        component_data.append(
-            (
-                name,
-                component_id,
-                minimum,
-                maximum,
-                default,
-            )
-        )
+        component_data.append((name, component_id))
 
     if not component_data:
         raise ValueError("No components found in config.xml")
 
-    ids = [component_id for _, component_id, _, _, _ in component_data]
+    ids = [component_id for _, component_id in component_data]
 
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate component IDs found")
@@ -96,7 +77,7 @@ def main() -> None:
 enum class ComponentId : uint8_t {
 """
 
-    for name, component_id, _, _, _ in component_data:
+    for name, component_id in component_data:
         enum_name = to_pascal_case(name)
 
         output += f"    {enum_name} = {component_id},\n"
@@ -107,21 +88,15 @@ enum class ComponentId : uint8_t {
 struct ComponentConfig {
     ComponentId id;
     const char* name;
-    float min;
-    float max;
-    float default_value;
 };
 
 inline const ComponentConfig component_configs[] = {
 """
 
-    for name, _, minimum, maximum, default in component_data:
+    for name, component_id in component_data:
         enum_name = to_pascal_case(name)
 
-        output += (
-            f'    {{ComponentId::{enum_name}, "{name}", '
-            f"{minimum:g}, {maximum:g}, {default:g}}},\n"
-        )
+        output += f'    {{ComponentId::{enum_name}, "{name}"}},\n'
 
     output += """\
 };
